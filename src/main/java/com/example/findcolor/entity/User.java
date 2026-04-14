@@ -27,7 +27,7 @@ public class User {
     private LocalDateTime createdAt;
 
     @OneToMany(mappedBy = "user", cascade = CascadeType.ALL)
-    private List<Image> images = new ArrayList<>();
+    private List<MissionImage> missionImages = new ArrayList<>();
 
     @OneToMany(mappedBy = "user", cascade = CascadeType.ALL)
     private List<AnalysisRequest> analysisRequests = new ArrayList<>();

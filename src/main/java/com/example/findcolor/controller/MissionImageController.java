@@ -1,8 +1,8 @@
 package com.example.findcolor.controller;
 
-import com.example.findcolor.entity.Image;
+import com.example.findcolor.entity.MissionImage;
 import com.example.findcolor.entity.User;
-import com.example.findcolor.repository.ImageRepository;
+import com.example.findcolor.repository.MissionImageRepository;
 import com.example.findcolor.repository.UserRepository;
 import com.example.findcolor.service.S3Service;
 import lombok.RequiredArgsConstructor;
@@ -14,10 +14,10 @@ import java.io.IOException;
 @RestController
 @RequestMapping("/api/images")
 @RequiredArgsConstructor
-public class ImageController {
+public class MissionImageController {
 
     private final S3Service s3Service;
-    private final ImageRepository imageRepository;
+    private final MissionImageRepository missionImageRepository;
     private final UserRepository userRepository;
 
     @PostMapping("/upload")
@@ -33,11 +33,11 @@ public class ImageController {
             String s3Url = s3Service.uploadFile(file);
 
             // 3. DB에 이미지 정보를 저장합니다.
-            Image image = Image.builder()
+            MissionImage image = MissionImage.builder()
                     .user(user)
                     .imageUrl(s3Url)
                     .build();
-            imageRepository.save(image);
+            missionImageRepository.save(image);
 
             return "S3 업로드 성공! URL: " + s3Url;
         } catch (IOException e) {

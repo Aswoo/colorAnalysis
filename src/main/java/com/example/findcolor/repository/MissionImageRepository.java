@@ -1,12 +1,12 @@
 package com.example.findcolor.repository;
 
-import com.example.findcolor.entity.Image;
+import com.example.findcolor.entity.MissionImage;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.stereotype.Repository;
 
 import java.util.List;
 
 @Repository
-public interface ImageRepository extends JpaRepository<Image, Long> {
-    List<Image> findByUserId(Long userId);
+public interface MissionImageRepository extends JpaRepository<MissionImage, Long> {
+    List<MissionImage> findByUserId(Long userId);
 }

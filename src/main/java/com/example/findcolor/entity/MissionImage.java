@@ -7,13 +7,13 @@ import org.hibernate.annotations.CreationTimestamp;
 import java.time.LocalDateTime;
 
 @Entity
-@Table(name = "images")
+@Table(name = "mission_images")
 @Getter
 @Setter
 @NoArgsConstructor
 @AllArgsConstructor
 @Builder
-public class Image {
+public class MissionImage {
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;

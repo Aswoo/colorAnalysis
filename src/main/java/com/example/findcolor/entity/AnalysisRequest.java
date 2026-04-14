@@ -24,7 +24,7 @@ public class AnalysisRequest {
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "image_id")
-    private Image image;
+    private MissionImage image;
 
     private String status;
 
