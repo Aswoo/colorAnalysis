@@ -1,39 +1,24 @@
-target/
-!.mvn/wrapper/maven-wrapper.jar
-/mvnw
-/mvnw.cmd
-.mvn/wrapper/maven-wrapper.properties
+# Backend (findColor)
+findColor/target/
+findColor/*.jar
+findColor/*.war
+findColor/*.ear
+findColor/.mvn/wrapper/maven-wrapper.jar
+findColor/.env
+findColor/HELP.md
 
-### STS ###
-.apt_generated
-.classpath
-.factorypath
-.project
-.settings
-.springBeans
-.sts4-cache
+# Frontend (findColorFE)
+findColorFE/node_modules/
+findColorFE/dist/
+findColorFE/dist-ssr/
+findColorFE/*.local
+findColorFE/.vscode/
+findColorFE/.idea/
+findColorFE/npm-debug.log*
+findColorFE/yarn-debug.log*
+findColorFE/yarn-error.log*
+findColorFE/.DS_Store
 
-### IntelliJ IDEA ###
-.idea
-*.iws
-*.iml
-*.ipr
-
-### NetBeans ###
-/nbproject/private/
-/nbbuild/
-/dist/
-/nbdist/
-/.nb-gradle/
-build/
-!**/src/main/resources/architecture.html
-
-### VS Code ###
-.vscode/
-
-### OS ###
+# OS Files
 .DS_Store
 Thumbs.db
-
-# Secrets ###
-.env
