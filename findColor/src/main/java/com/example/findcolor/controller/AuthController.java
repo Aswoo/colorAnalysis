@@ -9,7 +9,7 @@ import org.springframework.web.bind.annotation.*;
 @RestController
 @RequestMapping("/api/auth")
 @RequiredArgsConstructor
-@CrossOrigin(origins = "*") // Frontend 연동을 위해 임시 허용
+@CrossOrigin(origins = "*")
 public class AuthController {
 
     private final UserService userService;
@@ -18,9 +18,6 @@ public class AuthController {
     public ResponseEntity<AuthDto.UserResponse> signup(@RequestBody AuthDto.SignupRequest request) {
         return ResponseEntity.ok(userService.signup(request));
     }
-
-    @PostMapping("/login")
-    public ResponseEntity<AuthDto.UserResponse> login(@RequestBody AuthDto.LoginRequest request) {
-        return ResponseEntity.ok(userService.login(request));
-    }
+    
+    // login 메서드는 이제 CustomLoginFilter에서 처리하므로 삭제합니다.
 }

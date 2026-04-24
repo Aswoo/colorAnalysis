@@ -14,6 +14,7 @@ import java.io.IOException;
 @RestController
 @RequestMapping("/api/images")
 @RequiredArgsConstructor
+@CrossOrigin(origins = "*") // Frontend 도메인 허용
 public class MissionImageController {
 
     private final MissionService missionService;

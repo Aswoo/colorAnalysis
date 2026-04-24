@@ -5,12 +5,22 @@ import com.example.findcolor.dto.MissionResponse;
 import com.example.findcolor.entity.*;
 import com.example.findcolor.repository.*;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
+import java.util.List;
+import java.util.stream.Collectors;
 
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
+import com.example.findcolor.dto.HistoryResponse;
+
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class MissionService {
@@ -21,75 +31,76 @@ public class MissionService {
     private final MissionImageRepository missionImageRepository;
     private final AnalysisRequestRepository analysisRequestRepository;
     private final AnalysisResultRepository analysisResultRepository;
+    private final DetectedColorRepository detectedColorRepository;
 
-    /**
-     * 비동기 미션 수행: 이미지 업로드 -> 요청 생성(PROCESSING) -> 비동기 분석 호출
-     */
-    @Transactional
-    public MissionResponse performMission(Long userId, String targetSentiment, MultipartFile file) throws IOException {
-        
-        // 1. 유저 확인
-        User user = userRepository.findById(userId)
-                .orElseThrow(() -> new RuntimeException("사용자를 찾을 수 없습니다. ID: " + userId));
-
-        // 2. S3 이미지 업로드
-        String s3Url = s3Service.uploadFile(file);
-
-        // 3. 미션 이미지 정보 DB 저장
-        MissionImage missionImage = MissionImage.builder()
-                .user(user)
-                .imageUrl(s3Url)
-                .build();
-        missionImageRepository.save(missionImage);
-
-        // 4. 분석 요청 기록 선행 생성 (상태: PROCESSING)
-        AnalysisRequest request = AnalysisRequest.builder()
-                .user(user)
-                .image(missionImage)
-                .status("PROCESSING")
-                .isFavorite(false)
-                .build();
-        analysisRequestRepository.save(request);
-
-        // 5. 비동기 분석 실행 (OpenCV + K-means)
-        colorAnalysisService.processAnalysisAsync(request.getId(), file, targetSentiment);
-        
-        // DTO 반환 (엔티티 노출 방지)
-        return new MissionResponse(
-            request.getId(), 
-            request.getStatus(), 
-            missionImage.getImageUrl(), 
-            "분석 요청이 성공적으로 접수되었습니다."
-        );
+    @Transactional(readOnly = true)
+    public Page<HistoryResponse> getHistory(Long userId, Pageable pageable) {
+        return analysisRequestRepository.findByUserId(userId, pageable)
+                .map(request -> HistoryResponse.builder()
+                        .id(request.getId())
+                        .imageUrl(request.getImage().getImageUrl())
+                        .status(request.getStatus())
+                        .similarityScore(request.getAnalysisResult() != null ? request.getAnalysisResult().getSimilarityScore() : null)
+                        .matched(request.getAnalysisResult() != null ? request.getAnalysisResult().getMatched() : null)
+                        .createdAt(request.getCreatedAt())
+                        .isFavorite(request.isFavorite())
+                        .build());
     }
 
-    /**
-     * 특정 분석 요청의 진행 상태 및 결과를 조회합니다.
-     */
+    @Transactional
+    public MissionResponse performMission(Long userId, String targetSentiment, MultipartFile file) throws IOException {
+        User user = userRepository.findById(userId).orElseThrow(() -> new RuntimeException("사용자 없음"));
+        String s3Url = s3Service.uploadFile(file);
+        MissionImage missionImage = MissionImage.builder().user(user).imageUrl(s3Url).build();
+        missionImageRepository.save(missionImage);
+
+        AnalysisRequest request = AnalysisRequest.builder().user(user).image(missionImage).status("PROCESSING").isFavorite(false).build();
+        analysisRequestRepository.save(request);
+
+        // 파일 바이트를 트랜잭션 커밋 전에 미리 읽어둔다.
+        // HTTP 요청이 끝나면 MultipartFile 임시 파일이 삭제되므로
+        // @Async 스레드에서 file.getBytes()를 호출하면 IOException이 발생한다.
+        final byte[] fileBytes = file.getBytes();
+        final Long requestId = request.getId();
+
+        // 트랜잭션 커밋 후에 async를 실행해야 async 스레드에서 findById가 성공한다.
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCommit() {
+                colorAnalysisService.processAnalysisAsync(requestId, fileBytes, targetSentiment);
+            }
+        });
+
+        return new MissionResponse(request.getId(), request.getStatus(), missionImage.getImageUrl(), "접수됨");
+    }
+
     @Transactional(readOnly = true)
     public AnalysisStatusResponse getAnalysisStatus(Long requestId, String targetSentiment) {
         AnalysisRequest request = analysisRequestRepository.findById(requestId)
-                .orElseThrow(() -> new RuntimeException("요청을 찾을 수 없습니다. ID: " + requestId));
+                .orElseThrow(() -> new RuntimeException("요청 없음"));
 
-        // 실패 상태인 경우
-        if ("FAILED".equals(request.getStatus())) {
-            return AnalysisStatusResponse.failed(requestId, "분석 중 오류가 발생했습니다.");
-        }
+        if ("FAILED".equals(request.getStatus())) return AnalysisStatusResponse.failed(requestId, "분석 실패");
 
-        // 분석 완료된 경우 결과와 함께 반환
         if ("COMPLETED".equals(request.getStatus())) {
+            // [정석대로 복구] Sleep 제거
+            List<DetectedColor> detectedColors = detectedColorRepository.findByAnalysisRequestId(requestId);
+            
             AnalysisResult result = analysisResultRepository.findByAnalysisRequestId(requestId)
-                    .orElseThrow(() -> new RuntimeException("분석 결과를 찾을 수 없습니다."));
+                    .orElseThrow(() -> new RuntimeException("결과 없음"));
+            
+            List<AnalysisStatusResponse.DetectedColorResponse> palette = detectedColors.stream()
+                    .map(c -> new AnalysisStatusResponse.DetectedColorResponse(c.getColorHex(), c.getRatio()))
+                    .collect(Collectors.toList());
             
             return AnalysisStatusResponse.completed(
                 requestId, 
                 ColorType.fromString(targetSentiment), 
                 result.getMatched(), 
-                result.getSimilarityScore()
+                result.getSimilarityScore(),
+                palette
             );
         }
 
-        // 아직 진행 중인 경우 (PROCESSING)
         return AnalysisStatusResponse.processing(requestId, ColorType.fromString(targetSentiment));
     }
 }

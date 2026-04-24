@@ -24,3 +24,23 @@ export interface AnalysisResult {
   matched: boolean;
   detectedColors: DetectedColor[];
 }
+
+export interface MissionResponse {
+  requestId: number;
+  status: AnalysisStatus;
+}
+
+export interface DetectedColorResponse {
+  hex: string;
+  ratio: number;
+}
+
+export interface AnalysisStatusResponse {
+  requestId: number;
+  status: AnalysisStatus;
+  targetSentiment: string;
+  matched?: boolean;
+  similarityScore?: number;
+  colorPalettes?: DetectedColorResponse[]; // 필드명 변경 적용
+  message?: string;
+}
