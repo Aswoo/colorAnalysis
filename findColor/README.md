@@ -1,7 +1,7 @@
 # findColor — Backend
 
 Spring Boot 기반의 이미지 색상 분석 REST API 서버입니다.  
-사용자가 업로드한 이미지에서 OpenCV(JavaCV)를 활용해 HSV 색공간 분석을 수행하고, 타겟 색상과의 유사도를 계산합니다.
+사용자가 업로드한 이미지에서 OpenCV(JavaCV)를 활용해 Lab/LCH 색공간 분석을 수행하고, 타겟 색상과의 유사도를 계산합니다.
 
 ---
 
@@ -51,8 +51,10 @@ src/main/java/com/example/findcolor/
     → S3 업로드 (원본 저장)
     → AnalysisRequest 생성 (PROCESSING 상태)
     → @Async ColorAnalysisService 실행
-        → JavaCV로 HSV 변환 및 픽셀 분석
-        → ColorType Enum 기준 유사도 계산
+        → 150×150 리사이징
+        → BGR → Lab 변환
+        → K-means(K=8) 클러스터링 (Lab 공간)
+        → LCH Hue 각도 기반 유사도 계산
         → AnalysisResult 저장 (COMPLETED / FAILED)
 클라이언트 폴링 (2.5초 간격)
     → GET /api/images/analysis/{requestId}
@@ -125,81 +127,50 @@ Query: `?page=0&size=20`
 
 ---
 
+## Supported Colors
+
+`ColorType` Enum으로 LCH Hue 각도 기준 정의. 지원 색상:
+
+| 색상 | 기준 Hue (°) | 허용 편차 (°) |
+|------|-------------|-------------|
+| RED | 40 | ±30 |
+| PINK | 5 | ±25 |
+| YELLOW | 85 | ±30 |
+| GREEN | 130 | ±40 |
+| BLUE | 285 | ±35 |
+| PURPLE | 335 | ±40 |
+
+---
+
 ## Design Decisions
 
-### 왜 RGB가 아닌 HSV인가?
+### 왜 Lab/LCH 색공간인가?
 
-색상 분석에 RGB를 쓰는 것은 직관적이지만, 치명적인 약점이 있습니다.
+RGB는 빛의 세기 변화가 R, G, B 세 채널 모두에 영향을 줍니다. HSV의 H 값은 조명에 안정적이지만, 명도(V)가 낮으면 같은 색도 무채색으로 분류되어 그림자 영역이 분석에서 탈락합니다.
 
-```
-동일한 "녹색 잔디"라도:
-  밝은 햇빛 아래  →  RGB (120, 180, 80)
-  그늘 속         →  RGB (40,  80,  30)   ← 완전히 다른 값
-  흐린 날         →  RGB (80,  120, 55)
-```
+Lab은 인간 시각에 선형적으로 대응하는 색공간으로, K-means를 Lab 공간에서 수행하면 "사람 눈에 같아 보이는 색"끼리 같은 클러스터로 묶입니다. 여기서 a, b 채널만으로 Hue 각도(`atan2(b, a)`)를 계산하면 L(명도)을 완전히 무시하므로, 밝은 노랑과 어두운 황갈색이 동일한 색으로 인식됩니다.
 
-RGB에서 빛의 세기는 R, G, B 세 채널 전부에 영향을 미치므로 동일한 색상이 전혀 다른 수치로 나타납니다.
-
-HSV는 색의 본질을 세 가지 독립된 축으로 분리합니다.
-
-| 축 | 의미 | 역할 |
-|----|------|------|
-| **H** (Hue) | 색상 자체 | "이것은 녹색이다" |
-| **S** (Saturation) | 색의 진함 | "얼마나 선명한 녹색인가" |
-| **V** (Value) | 밝기 | "밝은 곳인가, 어두운 곳인가" |
-
-빛의 세기가 바뀌어도 H 값은 안정적으로 유지됩니다. 이 덕분에 그늘진 숲, 흐린 날의 하늘, 강한 조명 아래 꽃 등 **조명 조건이 다양한 실사 이미지에서도 색상을 신뢰할 수 있게 판별**할 수 있습니다.
-
-```java
-// ColorType.isMatch() — S, V가 너무 낮으면 무채색으로 간주하여 제외
-if (s < 25 || v < 25) return false;
-// 이후 H 값만으로 색상 판별 → 조명 변화에 강건
-if (h >= minH && h <= maxH) return true;
-```
+> 색상 분석 알고리즘의 상세 설명과 HSV → Lab ΔE → LCH 변천 과정은 아래 문서를 참고하세요.  
+> - [색상 분석 로직](docs/color_analysis.md)  
+> - [알고리즘 변천사](docs/color_analysis_evolution.md)
 
 ---
 
 ### 왜 단순 매칭이 아닌 유사도 점수인가?
 
-"해당 색이 있다 / 없다"는 이진 판별은 실용성이 낮습니다.  
-붉은 계열 사진인데 타겟 색 범위 경계에 아슬아슬하게 걸쳐 있다면, 단순 True/False로는 그 차이가 보이지 않습니다.
-
-이 프로젝트는 픽셀이 색상 범위 **중심에 얼마나 가까운지** + **채도가 얼마나 높은지**를 합산한 연속 점수를 사용합니다.
+"해당 색이 있다 / 없다"는 이진 판별은 실용성이 낮습니다. 이 프로젝트는 Hue 각도가 기준점에 **얼마나 가까운지**를 0~100 점수로 계산하고, 클러스터 비율과 밝기 가중치를 곱해 최종 판정합니다.
 
 ```
-score = 100 - (H 중심에서의 거리 / 범위 × 30)   // 위치 기반 70~100점
-      × (S / 255 × 0.2 + 0.8)                    // 채도 가중치
+유사도 = 100 - (hueDist / maxHueDist) × 40   // 중심: 100점, 경계: 60점
+matched = weightedScoreSum ≥ 15.0             // 조건 1: 절대 임계값
+       && targetRatio × 2 > otherChromatic    // 조건 2: 유채색 중 dominant
 ```
-
-결과적으로 "87.3% 일치"처럼 정량적인 피드백을 제공할 수 있습니다.
 
 ---
 
 ### 왜 비동기 처리 + 폴링인가?
 
-OpenCV 픽셀 분석은 CPU 집약적 작업입니다. 고해상도 이미지 한 장의 전체 픽셀을 순회하며 HSV 계산을 수행하면 수 초가 소요될 수 있습니다.
-
-이를 HTTP 요청 스레드에서 동기로 처리하면:
-- 요청 하나가 스레드를 수 초간 점유
-- 동시 요청이 늘어날수록 스레드 풀 고갈
-- 클라이언트는 응답 없이 수 초간 대기
-
-`@Async`로 분석을 별도 스레드에 위임하면 요청 스레드는 즉시 `requestId`를 반환하고 해제됩니다. 클라이언트는 2.5초 간격 폴링으로 완료 여부를 확인하며, 서버는 처리 중에도 다른 요청을 받을 수 있습니다.
-
----
-
-## Supported Colors
-
-`ColorType` Enum으로 HSV 범위 정의. 지원 색상:
-
-| 색상 | H 범위 (OpenCV 기준) |
-|------|---------------------|
-| RED | 0–15 또는 160–180 |
-| PINK | 140–170 |
-| YELLOW | 15–40 |
-| GREEN | 35–95 |
-| BLUE | 90–145 |
-| PURPLE | 135–155 |
+OpenCV K-means 분석은 CPU 집약적 작업입니다. `@Async`로 분석을 별도 스레드에 위임하면 요청 스레드는 즉시 `requestId`를 반환하고 해제됩니다. 클라이언트는 2.5초 간격 폴링으로 완료 여부를 확인하며, 서버는 처리 중에도 다른 요청을 받을 수 있습니다.
 
 ---
 
@@ -224,6 +195,7 @@ CREATE DATABASE findcolor CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 ```env
 AWS_ACCESS_KEY=your_access_key
 AWS_SECRET_KEY=your_secret_key
+JWT_SECRET_KEY=your_base64_encoded_secret
 ```
 
 ### 3. `application.properties` 확인
@@ -253,5 +225,6 @@ cloud.aws.region.static=ap-southeast-2
 |--------|------|
 | `AWS_ACCESS_KEY` | AWS IAM 액세스 키 |
 | `AWS_SECRET_KEY` | AWS IAM 시크릿 키 |
+| `JWT_SECRET_KEY` | Base64 인코딩된 HS256 시크릿 |
 
 > `.env` 파일은 절대 git에 커밋하지 마세요. `.gitignore`에 포함되어 있습니다.

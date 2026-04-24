@@ -32,11 +32,8 @@ public class ColorAnalysisService {
     private final AnalysisResultRepository analysisResultRepository;
     private final DetectedColorRepository detectedColorRepository;
 
-    @Value("${color.analysis.similarity-threshold}")
-    private double similarityThreshold;
-
-    @Value("${color.analysis.match-ratio-threshold}")
-    private double matchRatioThreshold;
+    @Value("${color.analysis.match-score-threshold}")
+    private double matchScoreThreshold;
 
     @Async
     @Transactional
@@ -47,13 +44,12 @@ public class ColorAnalysisService {
                     .orElseThrow(() -> new RuntimeException("분석 요청을 찾을 수 없습니다."));
 
             AnalysisData analysisData = analyzeWithRatios(fileBytes, targetSentiment);
-            
+
             double otherChromaticRatio = analysisData.totalChromaticRatio - analysisData.targetColorTotalRatio;
-            boolean isMatched = analysisData.targetColorTotalRatio >= matchRatioThreshold
+            boolean isMatched = analysisData.targetWeightedScoreSum >= matchScoreThreshold
                     && analysisData.targetColorTotalRatio * 2 > otherChromaticRatio;
             double finalScore = analysisData.maxSimilarityScore;
 
-            // 1. 분석 결과 저장
             AnalysisResult result = AnalysisResult.builder()
                     .analysisRequest(request)
                     .similarityScore(finalScore)
@@ -61,7 +57,6 @@ public class ColorAnalysisService {
                     .build();
             analysisResultRepository.save(result);
 
-            // 2. 색상 팔레트 저장
             List<DetectedColor> detectedList = new ArrayList<>();
             for (DetectedInfo info : analysisData.detectedColors) {
                 detectedList.add(DetectedColor.builder()
@@ -71,16 +66,14 @@ public class ColorAnalysisService {
                         .build());
             }
             detectedColorRepository.saveAll(detectedList);
-            
-            // [핵심 조치] DB에 즉시 물리적으로 기록하도록 강제
+
             detectedColorRepository.flush();
             analysisResultRepository.flush();
 
-            // 3. 마지막에 상태 변경 및 저장
             request.setStatus("COMPLETED");
             analysisRequestRepository.saveAndFlush(request);
 
-            log.info("[Analysis End] Result saved and flushed for request {}", requestId);
+            log.info("[Analysis End] Request {} → matched={}, score={:.2f}", requestId, isMatched, finalScore);
 
         } catch (Exception e) {
             log.error("[Analysis Error] Request ID: {}, Message: {}", requestId, e.getMessage());
@@ -94,12 +87,16 @@ public class ColorAnalysisService {
     private AnalysisData analyzeWithRatios(byte[] fileBytes, String targetSentiment) {
         ColorType colorType = ColorType.fromString(targetSentiment);
         Mat image = opencv_imgcodecs.imdecode(new Mat(fileBytes), opencv_imgcodecs.IMREAD_COLOR);
-        
-        Mat resizedImage = new Mat();
-        opencv_imgproc.resize(image, resizedImage, new Size(150, 150));
-        int totalPixels = resizedImage.rows() * resizedImage.cols();
 
-        Mat data = resizedImage.reshape(1, totalPixels);
+        Mat resized = new Mat();
+        opencv_imgproc.resize(image, resized, new Size(150, 150));
+        int totalPixels = resized.rows() * resized.cols();
+
+        // K-means를 Lab 공간에서 수행: 클러스터링 기준 = 인간 시각 거리
+        Mat labImage = new Mat();
+        opencv_imgproc.cvtColor(resized, labImage, opencv_imgproc.COLOR_BGR2Lab);
+
+        Mat data = labImage.reshape(1, totalPixels);
         Mat data32f = new Mat();
         data.convertTo(data32f, opencv_core.CV_32F);
 
@@ -119,32 +116,51 @@ public class ColorAnalysisService {
         FloatIndexer centerIndexer = centers.createIndexer();
 
         for (int i = 0; i < k; i++) {
-            float b = centerIndexer.get(i, 0);
-            float g = centerIndexer.get(i, 1);
-            float r = centerIndexer.get(i, 2);
+            // 클러스터 중심 = Lab byte scale (L: 0-255, a/b: 0-255)
+            float rawL = centerIndexer.get(i, 0);
+            float rawA = centerIndexer.get(i, 1);
+            float rawB = centerIndexer.get(i, 2);
 
-            Mat bgrPixel = new Mat(1, 1, opencv_core.CV_8UC3, new Scalar(b, g, r, 0));
-            Mat hsvPixel = new Mat();
-            opencv_imgproc.cvtColor(bgrPixel, hsvPixel, opencv_imgproc.COLOR_BGR2HSV);
+            double labL = rawL * 100.0 / 255.0;
+            double labA = rawA - 128.0;
+            double labB = rawB - 128.0;
 
-            int h = hsvPixel.data().get(0) & 0xFF;
-            int s = hsvPixel.data().get(1) & 0xFF;
-            int v = hsvPixel.data().get(2) & 0xFF;
+            // hex 저장: Lab → BGR 역변환
+            Mat labPixel = new Mat(1, 1, opencv_core.CV_8UC3, new Scalar(rawL, rawA, rawB, 0));
+            Mat bgrPixel = new Mat();
+            opencv_imgproc.cvtColor(labPixel, bgrPixel, opencv_imgproc.COLOR_Lab2BGR);
+            int r = bgrPixel.data().get(2) & 0xFF;
+            int g = bgrPixel.data().get(1) & 0xFF;
+            int b = bgrPixel.data().get(0) & 0xFF;
 
-            double similarity = colorType.calculateSimilarity(h, s, v);
             double ratio = (double) clusterCounts[i] / totalPixels;
-            String hex = String.format("#%02X%02X%02X", (int)r, (int)g, (int)b);
+            analysisData.detectedColors.add(new DetectedInfo(String.format("#%02X%02X%02X", r, g, b), ratio));
 
-            analysisData.detectedColors.add(new DetectedInfo(hex, ratio));
+            // 밝기 가중치: Lab L 기준 (L<12 ≈ V<30, L<20 ≈ V<50)
+            double brightnessWeight;
+            if (labL < 12.0) {
+                brightnessWeight = 0.0;
+            } else if (labL < 20.0) {
+                brightnessWeight = (labL - 12.0) / 8.0 * 0.5 + 0.5;
+            } else {
+                brightnessWeight = 1.0;
+            }
 
-            if (s >= 50 && v >= 50) {
+            // 유채색 합계: Chroma≥15 AND L≥12
+            double chroma = Math.sqrt(labA * labA + labB * labB);
+            if (chroma >= 15.0 && labL >= 12.0) {
                 analysisData.totalChromaticRatio += ratio;
             }
+
+            double similarity = colorType.calculateSimilarity(labA, labB);
+            double effectiveRatio = ratio * brightnessWeight;
+
             if (similarity > analysisData.maxSimilarityScore) {
                 analysisData.maxSimilarityScore = similarity;
             }
-            if (similarity >= similarityThreshold) {
-                analysisData.targetColorTotalRatio += ratio;
+            if (similarity > 0) {
+                analysisData.targetColorTotalRatio += effectiveRatio;
+                analysisData.targetWeightedScoreSum += similarity * effectiveRatio;
             }
         }
         return analysisData;
@@ -153,6 +169,7 @@ public class ColorAnalysisService {
     private static class AnalysisData {
         double maxSimilarityScore = 0.0;
         double targetColorTotalRatio = 0.0;
+        double targetWeightedScoreSum = 0.0;
         double totalChromaticRatio = 0.0;
         List<DetectedInfo> detectedColors = new ArrayList<>();
     }

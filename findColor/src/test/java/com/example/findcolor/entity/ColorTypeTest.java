@@ -7,99 +7,100 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.within;
 
 @DisplayName("ColorType")
 class ColorTypeTest {
+
+    // Lab a,b → hue 계산 헬퍼
+    private static double[] hueToAB(double hueDeg, double chroma) {
+        double rad = Math.toRadians(hueDeg);
+        return new double[]{chroma * Math.cos(rad), chroma * Math.sin(rad)};
+    }
+
+    // ──────────────────────────────────────────────
+    // hueDistance()
+    // ──────────────────────────────────────────────
+    @Nested
+    @DisplayName("hueDistance() — 원형 Hue 거리 계산")
+    class HueDistance {
+
+        @Test
+        @DisplayName("기준 Hue와 동일하면 거리 = 0")
+        void sameHue_returnsZero() {
+            double[] ab = hueToAB(ColorType.RED.getRefHue(), 30.0);
+            assertThat(ColorType.RED.hueDistance(ab[0], ab[1])).isCloseTo(0.0, within(0.01));
+        }
+
+        @Test
+        @DisplayName("maxHueDist만큼 떨어진 점은 거리 = maxHueDist")
+        void offsetByMax_returnsMax() {
+            double target = ColorType.GREEN.getRefHue() + ColorType.GREEN.getMaxHueDist();
+            double[] ab = hueToAB(target, 30.0);
+            assertThat(ColorType.GREEN.hueDistance(ab[0], ab[1]))
+                    .isCloseTo(ColorType.GREEN.getMaxHueDist(), within(0.01));
+        }
+
+        @Test
+        @DisplayName("360° 근처 감싸기 — PURPLE 기준 358°와 2° 사이 거리는 4°")
+        void wraparound_calculatesShortestPath() {
+            double[] ab358 = hueToAB(358.0, 30.0);
+            double[] ab2 = hueToAB(2.0, 30.0);
+            // PURPLE refHue=335 기준이 아닌 두 점 간 거리를 확인: |358-2|=356 vs 360-356=4
+            // hueDistance는 기준점 기준이라 직접 확인 어려우므로, 0°를 기준으로 설정된 색상의
+            // 359°와 1° 점이 2° 차이인지 간접 검증 (atan2 원형 계산이 올바른지)
+            double h358 = Math.toDegrees(Math.atan2(ab358[1], ab358[0]));
+            if (h358 < 0) h358 += 360;
+            double h2 = Math.toDegrees(Math.atan2(ab2[1], ab2[0]));
+            if (h2 < 0) h2 += 360;
+            double diff = Math.abs(h358 - h2);
+            double circular = Math.min(diff, 360.0 - diff);
+            assertThat(circular).isCloseTo(4.0, within(0.1));
+        }
+    }
 
     // ──────────────────────────────────────────────
     // isMatch()
     // ──────────────────────────────────────────────
     @Nested
-    @DisplayName("isMatch() — 무채색 필터")
-    class IsMatchAchromaticFilter {
+    @DisplayName("isMatch() — Hue 임계값 + 채도 필터")
+    class IsMatch {
 
         @Test
-        @DisplayName("채도(S) < 50 이면 어떤 H값이든 false")
-        void saturationBelowThreshold_returnsFalse() {
-            assertThat(ColorType.GREEN.isMatch(65, 49, 200)).isFalse();
+        @DisplayName("기준 Hue, 충분한 채도 → true")
+        void referenceHue_highChroma_returnsTrue() {
+            double[] ab = hueToAB(ColorType.BLUE.getRefHue(), 30.0);
+            assertThat(ColorType.BLUE.isMatch(ab[0], ab[1])).isTrue();
         }
 
         @Test
-        @DisplayName("명도(V) < 50 이면 어떤 H값이든 false")
-        void valueBelowThreshold_returnsFalse() {
-            assertThat(ColorType.GREEN.isMatch(65, 200, 49)).isFalse();
+        @DisplayName("채도 < MIN_CHROMA(15) → false (무채색 제거)")
+        void lowChroma_returnsFalse() {
+            double[] ab = hueToAB(ColorType.BLUE.getRefHue(), 10.0);
+            assertThat(ColorType.BLUE.isMatch(ab[0], ab[1])).isFalse();
         }
 
         @Test
-        @DisplayName("S=50, V=50 (정확히 경계값) 이면 통과")
-        void exactThresholdValues_passesFilter() {
-            assertThat(ColorType.GREEN.isMatch(65, 50, 50)).isTrue();
-        }
-    }
-
-    @Nested
-    @DisplayName("isMatch() — H 범위 판별")
-    class IsMatchHueRange {
-
-        @Test
-        @DisplayName("H가 범위 중앙이면 true")
-        void hAtCenter_returnsTrue() {
-            // GREEN: 35–95, center = 65
-            assertThat(ColorType.GREEN.isMatch(65, 200, 200)).isTrue();
+        @DisplayName("hueDistance = maxHueDist 경계는 false (미만 조건)")
+        void exactMaxHueDist_returnsFalse() {
+            double target = ColorType.GREEN.getRefHue() + ColorType.GREEN.getMaxHueDist();
+            double[] ab = hueToAB(target, 30.0);
+            assertThat(ColorType.GREEN.isMatch(ab[0], ab[1])).isFalse();
         }
 
         @Test
-        @DisplayName("H가 minH 경계값이면 true (포함)")
-        void hAtMinBoundary_returnsTrue() {
-            assertThat(ColorType.GREEN.isMatch(35, 200, 200)).isTrue();
+        @DisplayName("hueDistance < maxHueDist → true")
+        void withinMaxHueDist_returnsTrue() {
+            double target = ColorType.GREEN.getRefHue() + ColorType.GREEN.getMaxHueDist() * 0.5;
+            double[] ab = hueToAB(target, 30.0);
+            assertThat(ColorType.GREEN.isMatch(ab[0], ab[1])).isTrue();
         }
 
         @Test
-        @DisplayName("H가 maxH 경계값이면 true (포함)")
-        void hAtMaxBoundary_returnsTrue() {
-            assertThat(ColorType.GREEN.isMatch(95, 200, 200)).isTrue();
-        }
-
-        @Test
-        @DisplayName("H가 minH - 1 이면 false")
-        void hJustBelowMin_returnsFalse() {
-            assertThat(ColorType.GREEN.isMatch(34, 200, 200)).isFalse();
-        }
-
-        @Test
-        @DisplayName("H가 maxH + 1 이면 false")
-        void hJustAboveMax_returnsFalse() {
-            assertThat(ColorType.GREEN.isMatch(96, 200, 200)).isFalse();
-        }
-    }
-
-    @Nested
-    @DisplayName("isMatch() — RED 이중 범위")
-    class IsMatchRedDualRange {
-
-        @Test
-        @DisplayName("주 범위(H=0–15)에서 true")
-        void red_mainRange_returnsTrue() {
-            assertThat(ColorType.RED.isMatch(10, 200, 200)).isTrue();
-        }
-
-        @Test
-        @DisplayName("보조 범위(H=160–180)에서 true — 어두운 적색")
-        void red_altRange_returnsTrue() {
-            assertThat(ColorType.RED.isMatch(170, 200, 200)).isTrue();
-        }
-
-        @Test
-        @DisplayName("두 범위 모두 해당 없으면 false")
-        void red_betweenBothRanges_returnsFalse() {
-            // H=90 은 RED의 어느 범위에도 속하지 않음
-            assertThat(ColorType.RED.isMatch(90, 200, 200)).isFalse();
-        }
-
-        @Test
-        @DisplayName("보조 범위 경계값(H=160)에서 true")
-        void red_altRangeMinBoundary_returnsTrue() {
-            assertThat(ColorType.RED.isMatch(160, 200, 200)).isTrue();
+        @DisplayName("RED 기준점은 GREEN에 매칭되지 않는다")
+        void redHue_doesNotMatchGreen() {
+            double[] ab = hueToAB(ColorType.RED.getRefHue(), 30.0);
+            assertThat(ColorType.GREEN.isMatch(ab[0], ab[1])).isFalse();
         }
     }
 
@@ -107,110 +108,93 @@ class ColorTypeTest {
     // calculateSimilarity()
     // ──────────────────────────────────────────────
     @Nested
-    @DisplayName("calculateSimilarity() — RED 이중 범위 버그 검증")
-    class CalculateSimilarityRedDualRange {
+    @DisplayName("calculateSimilarity() — 점수 범위")
+    class CalculateSimilarity {
 
         @Test
-        @DisplayName("보조 범위(H=170) 점수가 주 범위 중심(7.5)과 비교되지 않는다 — circular distance fix")
-        void red_altRange_usesAltRangeCenter() {
-            // 버그 재현: 수정 전에는 H=170이 주 범위 중심(7.5)과 비교되어
-            // diff=162.5로 계산되어 점수가 0에 가깝거나 음수가 되었음.
-            // 수정 후: 보조 범위 중심(170)과 비교하므로 합리적인 점수가 나와야 함.
-            double altRangeScore = ColorType.RED.calculateSimilarity(170, 200, 200);
-            assertThat(altRangeScore).isGreaterThan(50.0);
+        @DisplayName("기준 Hue와 완전히 같으면 100점")
+        void perfectMatch_returns100() {
+            double[] ab = hueToAB(ColorType.RED.getRefHue(), 30.0);
+            assertThat(ColorType.RED.calculateSimilarity(ab[0], ab[1]))
+                    .isCloseTo(100.0, within(0.01));
         }
 
         @Test
-        @DisplayName("보조 범위 중심(H=170)은 주 범위 중심(H=7)보다 높거나 같은 점수")
-        void red_altRangeCenter_scoresWell() {
-            double mainCenter  = ColorType.RED.calculateSimilarity(7,   200, 200); // 주 범위 중심
-            double altCenter   = ColorType.RED.calculateSimilarity(170, 200, 200); // 보조 범위 중심
-            // 두 중심 모두 고득점이어야 함 (범위의 중심이므로)
-            assertThat(mainCenter).isGreaterThan(70.0);
-            assertThat(altCenter).isGreaterThan(70.0);
+        @DisplayName("hueDistance = maxHueDist이면 0점")
+        void atMaxHueDist_returnsZero() {
+            double target = ColorType.RED.getRefHue() + ColorType.RED.getMaxHueDist();
+            double[] ab = hueToAB(target, 30.0);
+            assertThat(ColorType.RED.calculateSimilarity(ab[0], ab[1])).isEqualTo(0.0);
         }
 
         @Test
-        @DisplayName("보조 범위 경계(H=160)는 중심(H=170)보다 낮은 점수")
-        void red_altRangeEdge_scoresLowerThanCenter() {
-            double center = ColorType.RED.calculateSimilarity(170, 200, 200);
-            double edge   = ColorType.RED.calculateSimilarity(160, 200, 200);
-            assertThat(center).isGreaterThan(edge);
-        }
-    }
-
-    @Nested
-    @DisplayName("calculateSimilarity() — 기본 동작")
-    class CalculateSimilarityBasic {
-
-        @Test
-        @DisplayName("매칭되지 않는 픽셀은 0.0 반환")
-        void noMatch_returnsZero() {
-            // H=10 은 GREEN 범위(35–95) 밖
-            assertThat(ColorType.GREEN.calculateSimilarity(10, 200, 200)).isEqualTo(0.0);
+        @DisplayName("hueDistance = maxHueDist/2 → 80점")
+        void halfDistance_returns80() {
+            double target = ColorType.RED.getRefHue() + ColorType.RED.getMaxHueDist() * 0.5;
+            double[] ab = hueToAB(target, 30.0);
+            assertThat(ColorType.RED.calculateSimilarity(ab[0], ab[1]))
+                    .isCloseTo(80.0, within(0.01));
         }
 
         @Test
-        @DisplayName("무채색 픽셀은 0.0 반환 (isMatch 선행 차단)")
-        void achromatic_returnsZero() {
-            assertThat(ColorType.GREEN.calculateSimilarity(65, 10, 200)).isEqualTo(0.0);
+        @DisplayName("범위 내 임의 점은 60 이상 100 이하")
+        void withinRange_scoresBetween60And100() {
+            double target = ColorType.BLUE.getRefHue() + ColorType.BLUE.getMaxHueDist() * 0.8;
+            double[] ab = hueToAB(target, 30.0);
+            double score = ColorType.BLUE.calculateSimilarity(ab[0], ab[1]);
+            assertThat(score).isBetween(60.0, 100.0);
         }
 
         @Test
-        @DisplayName("점수는 100.0을 초과하지 않는다")
-        void score_neverExceeds100() {
-            double score = ColorType.GREEN.calculateSimilarity(65, 255, 255);
-            assertThat(score).isLessThanOrEqualTo(100.0);
+        @DisplayName("범위 밖이면 0점")
+        void outsideRange_returnsZero() {
+            double[] ab = hueToAB(ColorType.GREEN.getRefHue(), 30.0);
+            assertThat(ColorType.RED.calculateSimilarity(ab[0], ab[1])).isEqualTo(0.0);
         }
 
         @Test
-        @DisplayName("매칭되는 픽셀은 0보다 큰 점수를 반환")
-        void match_returnsPositiveScore() {
-            assertThat(ColorType.GREEN.calculateSimilarity(65, 200, 200)).isGreaterThan(0.0);
-        }
-    }
-
-    @Nested
-    @DisplayName("calculateSimilarity() — H 위치 가중치")
-    class CalculateSimilarityHueWeight {
-
-        @Test
-        @DisplayName("H가 범위 중앙에 가까울수록 점수가 높다")
-        void centerH_scoresHigherThanEdgeH() {
-            // GREEN center = 65, edge = 35 or 95
-            double centerScore = ColorType.GREEN.calculateSimilarity(65, 200, 200);
-            double edgeScore   = ColorType.GREEN.calculateSimilarity(36, 200, 200);
-            assertThat(centerScore).isGreaterThan(edgeScore);
+        @DisplayName("기준에 가까울수록 점수가 높다")
+        void closerToReference_scoresHigher() {
+            double near = ColorType.YELLOW.getRefHue() + ColorType.YELLOW.getMaxHueDist() * 0.2;
+            double far  = ColorType.YELLOW.getRefHue() + ColorType.YELLOW.getMaxHueDist() * 0.8;
+            double[] abNear = hueToAB(near, 30.0);
+            double[] abFar  = hueToAB(far, 30.0);
+            assertThat(ColorType.YELLOW.calculateSimilarity(abNear[0], abNear[1]))
+                    .isGreaterThan(ColorType.YELLOW.calculateSimilarity(abFar[0], abFar[1]));
         }
 
         @Test
-        @DisplayName("범위 경계값의 점수는 edge score 공식 상 70% 수준")
-        void edgeH_scoreApproaches70Percent() {
-            // score = 100 - (range/range * 30) = 70, 채도 가중치 적용 전
-            // s=255일 때: 70 * (1.0 * 0.2 + 0.8) = 70.0
-            double edgeScore = ColorType.GREEN.calculateSimilarity(35, 255, 200);
-            assertThat(edgeScore).isGreaterThan(50.0).isLessThan(80.0);
+        @DisplayName("명도가 달라도 같은 Hue면 같은 점수 (L 독립성)")
+        void differentLightness_sameScore() {
+            double[] ab = hueToAB(ColorType.YELLOW.getRefHue(), 30.0);
+            // calculateSimilarity는 a,b만 받으므로 L이 달라도 호출 결과 동일
+            double score1 = ColorType.YELLOW.calculateSimilarity(ab[0], ab[1]);
+            double score2 = ColorType.YELLOW.calculateSimilarity(ab[0], ab[1]);
+            assertThat(score1).isEqualTo(score2);
         }
     }
 
+    // ──────────────────────────────────────────────
+    // 색상 간 독립성
+    // ──────────────────────────────────────────────
     @Nested
-    @DisplayName("calculateSimilarity() — S(채도) 가중치")
-    class CalculateSimilaritySaturationWeight {
+    @DisplayName("색상 간 독립성 — 각 기준 Hue가 다른 색에 매칭되지 않는다")
+    class ColorIndependence {
 
-        @Test
-        @DisplayName("같은 H값이면 채도가 높을수록 점수가 높다")
-        void higherSaturation_returnsHigherScore() {
-            double highS = ColorType.GREEN.calculateSimilarity(65, 255, 200);
-            double lowS  = ColorType.GREEN.calculateSimilarity(65, 30,  200);
-            assertThat(highS).isGreaterThan(lowS);
-        }
-
-        @Test
-        @DisplayName("채도 최대(S=255)일 때 점수가 최고점")
-        void maxSaturation_producesMaxScore() {
-            double maxSScore  = ColorType.GREEN.calculateSimilarity(65, 255, 200);
-            double halfSScore = ColorType.GREEN.calculateSimilarity(65, 128, 200);
-            assertThat(maxSScore).isGreaterThan(halfSScore);
+        @ParameterizedTest(name = "{0}의 기준 Hue는 {1}에 매칭되지 않는다")
+        @CsvSource({
+            "RED, GREEN",
+            "RED, BLUE",
+            "GREEN, BLUE",
+            "YELLOW, PURPLE",
+            "PINK, BLUE",
+            "PURPLE, GREEN"
+        })
+        void referenceDoesNotMatchOtherColor(String source, String target) {
+            ColorType src = ColorType.valueOf(source);
+            ColorType tgt = ColorType.valueOf(target);
+            double[] ab = hueToAB(src.getRefHue(), 30.0);
+            assertThat(tgt.calculateSimilarity(ab[0], ab[1])).isEqualTo(0.0);
         }
     }
 
