@@ -1,0 +1,150 @@
+digraph findColor {
+    graph [
+        rankdir=TB
+        fontname="Helvetica"
+        fontsize=13
+        bgcolor="#F8F9FA"
+        pad=0.8
+        splines=polyline
+        nodesep=0.7
+        ranksep=0.9
+        compound=true
+    ]
+    node [fontname="Helvetica" fontsize=11 style="filled,rounded" shape=box margin="0.22,0.13"]
+    edge [fontname="Helvetica" fontsize=9]
+
+    // ── Frontend ──────────────────────────────────────────
+    subgraph cluster_fe {
+        label="🖥  Frontend  (React 19 + TypeScript)"
+        fontname="Helvetica Bold" fontsize=14
+        style="filled,rounded" color="#2980B9" fillcolor="#EBF5FB"
+        margin=20
+
+        node [fillcolor="#FFFFFF" color="#2980B9" fontcolor="#1A1A2E"]
+        Login       [label="Login / Signup"]
+        Home        [label="Home\n업로드 + 색상 선택"]
+        History     [label="History\n분석 히스토리"]
+        authSvc     [label="authService"]
+        analysisSvc [label="analysisService\n(2.5s 폴링)"]
+        apiClient   [label="apiClient\naxios + JWT interceptor" fillcolor="#D6EAF8"]
+
+        Login   -> authSvc    [style=dashed color="#7FB3D3"]
+        Home    -> analysisSvc [style=dashed color="#7FB3D3"]
+        History -> analysisSvc [style=dashed color="#7FB3D3"]
+        authSvc    -> apiClient [color="#2980B9"]
+        analysisSvc -> apiClient [color="#2980B9"]
+
+        { rank=same Login Home History }
+        { rank=same authSvc analysisSvc }
+    }
+
+    // ── Backend ───────────────────────────────────────────
+    subgraph cluster_be {
+        label="☕  Backend  (Spring Boot 3.4)"
+        fontname="Helvetica Bold" fontsize=14
+        style="filled,rounded" color="#1E8449" fillcolor="#EAFAF1"
+        margin=20
+
+        // Security
+        subgraph cluster_sec {
+            label="Security Layer" fontsize=12
+            style="filled,rounded" color="#58D68D" fillcolor="#D5F5E3" margin=12
+            node [fillcolor="#FFFFFF" color="#1E8449" fontcolor="#1A1A2E"]
+            loginFilter [label="CustomLoginFilter\nPOST /api/auth/login"]
+            jwtFilter   [label="JwtAuthorizationFilter\n모든 요청"]
+        }
+
+        // Controller
+        subgraph cluster_ctl {
+            label="Controller Layer" fontsize=12
+            style="filled,rounded" color="#58D68D" fillcolor="#D5F5E3" margin=12
+            node [fillcolor="#FFFFFF" color="#1E8449" fontcolor="#1A1A2E"]
+            authCtrl    [label="AuthController\n/api/auth/signup"]
+            missionCtrl [label="MissionImageController\n/api/images/**"]
+            analysisCtrl [label="AnalysisController\n/api/analysis/history"]
+            { rank=same authCtrl missionCtrl analysisCtrl }
+        }
+
+        // Service
+        subgraph cluster_svc {
+            label="Service Layer" fontsize=12
+            style="filled,rounded" color="#58D68D" fillcolor="#D5F5E3" margin=12
+            node [fillcolor="#FFFFFF" color="#1E8449" fontcolor="#1A1A2E"]
+            userSvc    [label="UserService"]
+            missionSvc [label="MissionService"]
+            s3Svc      [label="S3Service"]
+            colorSvc   [label="ColorAnalysisService\n@Async"]
+            { rank=same userSvc missionSvc s3Svc colorSvc }
+        }
+
+        // Color Analysis Core
+        subgraph cluster_core {
+            label="Color Analysis Core" fontsize=12
+            style="filled,rounded" color="#E67E22" fillcolor="#FEF9E7" margin=12
+            node [fillcolor="#FFFFFF" color="#E67E22" fontcolor="#1A1A2E"]
+            kmeans    [label="K-means  K=8\nLab 공간 클러스터링"]
+            lch       [label="LCH Hue 각도\natan2(b, a)"]
+            colorEnum [label="ColorType Enum\n유사도 계산"]
+            kmeans -> lch -> colorEnum [color="#E67E22" penwidth=1.5]
+        }
+
+        // Repository
+        subgraph cluster_repo {
+            label="Repository Layer" fontsize=12
+            style="filled,rounded" color="#58D68D" fillcolor="#D5F5E3" margin=12
+            node [fillcolor="#FFFFFF" color="#1E8449" fontcolor="#1A1A2E"]
+            userRepo   [label="UserRepository"]
+            reqRepo    [label="AnalysisRequestRepository"]
+            resultRepo [label="AnalysisResultRepository"]
+            colorRepo  [label="DetectedColorRepository"]
+            { rank=same userRepo reqRepo resultRepo colorRepo }
+        }
+
+        // Security → Controller
+        loginFilter  -> authCtrl    [color="#1E8449"]
+        jwtFilter    -> missionCtrl [color="#1E8449"]
+        jwtFilter    -> analysisCtrl [color="#1E8449"]
+
+        // Controller → Service
+        authCtrl     -> userSvc    [color="#1E8449"]
+        missionCtrl  -> missionSvc [color="#1E8449"]
+        missionCtrl  -> colorSvc   [color="#1E8449"]
+        analysisCtrl -> missionSvc [color="#1E8449"]
+        missionSvc   -> s3Svc      [color="#1E8449"]
+        colorSvc     -> kmeans     [color="#E67E22" penwidth=1.5]
+
+        // Service → Repository
+        userSvc    -> userRepo   [style=dashed color="#58D68D"]
+        missionSvc -> reqRepo    [style=dashed color="#58D68D"]
+        colorSvc   -> resultRepo [style=dashed color="#58D68D"]
+        colorSvc   -> colorRepo  [style=dashed color="#58D68D"]
+        colorSvc   -> reqRepo    [style=dashed color="#58D68D"]
+    }
+
+    // ── Infrastructure ────────────────────────────────────
+    DB [label="findcolor DB" shape=none imagescale=true
+        image="mysql_icon_sm.png" labelloc=b width=1.4 height=1.0
+        fontname="Helvetica" fontsize=12 fontcolor="#1A1A2E"]
+    S3store [label="이미지 원본 저장" shape=none imagescale=true
+        image="s3_icon.png" labelloc=b width=1.2 height=1.4
+        fontname="Helvetica" fontsize=12 fontcolor="#1A1A2E"]
+
+    // ── Cross-cluster edges ───────────────────────────────
+    apiClient -> loginFilter [
+        label="POST /api/auth/login"
+        color="#2980B9" fontcolor="#2980B9" penwidth=2
+        ltail=cluster_fe lhead=cluster_sec
+    ]
+    apiClient -> jwtFilter [
+        label="REST + JWT Bearer"
+        color="#2980B9" fontcolor="#2980B9" penwidth=2
+    ]
+    s3Svc -> S3store [
+        label="PutObject"
+        color="#FF9900" fontcolor="#FF9900" penwidth=2
+    ]
+    userRepo   -> DB [color="#8E44AD" penwidth=1.5]
+    reqRepo    -> DB [color="#8E44AD" penwidth=1.5]
+    resultRepo -> DB [color="#8E44AD" penwidth=1.5]
+    colorRepo  -> DB [color="#8E44AD" penwidth=1.5]
+}
