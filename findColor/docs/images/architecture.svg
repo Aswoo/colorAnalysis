@@ -264,7 +264,7 @@
 <g id="node24" class="node">
 <title>S3store</title>
 <path fill="lightgrey" stroke="none" d="M1092.59,-391.77C1092.59,-391.77 1005.41,-391.77 1005.41,-391.77 999.41,-391.77 993.41,-385.77 993.41,-379.77 993.41,-379.77 993.41,-302.97 993.41,-302.97 993.41,-296.97 999.41,-290.97 1005.41,-290.97 1005.41,-290.97 1092.59,-290.97 1092.59,-290.97 1098.59,-290.97 1104.59,-296.97 1104.59,-302.97 1104.59,-302.97 1104.59,-379.77 1104.59,-379.77 1104.59,-385.77 1098.59,-391.77 1092.59,-391.77"/>
-<image xlink:href="s3_icon.png" width="84px" height="100.8px" preserveAspectRatio="xMinYMin meet" x="1007" y="-391.77"/>
+<image xlink:href="images/s3_icon.png" width="84px" height="100.8px" preserveAspectRatio="xMinYMin meet" x="1007" y="-391.77"/>
 <text text-anchor="middle" x="1049" y="-294.57" font-family="Helvetica,sans-Serif" font-size="12.00" fill="#1a1a2e">이미지 원본 저장</text>
 </g>
 <!-- s3Svc&#45;&gt;S3store -->
@@ -347,7 +347,7 @@
 <g id="node23" class="node">
 <title>DB</title>
 <path fill="lightgrey" stroke="none" d="M1081.4,-223.97C1081.4,-223.97 1004.6,-223.97 1004.6,-223.97 998.6,-223.97 992.6,-217.97 992.6,-211.97 992.6,-211.97 992.6,-163.97 992.6,-163.97 992.6,-157.97 998.6,-151.97 1004.6,-151.97 1004.6,-151.97 1081.4,-151.97 1081.4,-151.97 1087.4,-151.97 1093.4,-157.97 1093.4,-163.97 1093.4,-163.97 1093.4,-211.97 1093.4,-211.97 1093.4,-217.97 1087.4,-223.97 1081.4,-223.97"/>
-<image xlink:href="mysql_icon_sm.png" width="100.8px" height="52.1379px" preserveAspectRatio="xMinYMin meet" x="992.6" y="-214.039"/>
+<image xlink:href="images/mysql_icon_sm.png" width="100.8px" height="52.1379px" preserveAspectRatio="xMinYMin meet" x="992.6" y="-214.039"/>
 <text text-anchor="middle" x="1043" y="-153.32" font-family="Helvetica,sans-Serif" font-size="12.00" fill="#1a1a2e">findcolor DB</text>
 </g>
 <!-- userRepo&#45;&gt;DB -->

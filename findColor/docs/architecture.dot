@@ -123,10 +123,10 @@ digraph findColor {
 
     // ── Infrastructure ────────────────────────────────────
     DB [label="findcolor DB" shape=none imagescale=true
-        image="mysql_icon_sm.png" labelloc=b width=1.4 height=1.0
+        image="images/mysql_icon_sm.png" labelloc=b width=1.4 height=1.0
         fontname="Helvetica" fontsize=12 fontcolor="#1A1A2E"]
     S3store [label="이미지 원본 저장" shape=none imagescale=true
-        image="s3_icon.png" labelloc=b width=1.2 height=1.4
+        image="images/s3_icon.png" labelloc=b width=1.2 height=1.4
         fontname="Helvetica" fontsize=12 fontcolor="#1A1A2E"]
 
     // ── Cross-cluster edges ───────────────────────────────
