@@ -1,8 +1,10 @@
 package com.example.findcolor.dto;
 
+import com.fasterxml.jackson.annotation.JsonProperty;
 import lombok.*;
 
 import java.time.LocalDateTime;
+import java.util.List;
 
 @Getter
 @Setter
@@ -16,5 +18,9 @@ public class HistoryResponse {
     private Double similarityScore;
     private Boolean matched;
     private LocalDateTime createdAt;
+    @JsonProperty("isFavorite")
     private boolean isFavorite;
+    private List<PaletteColor> palette;
+
+    public record PaletteColor(String hex, Double ratio) {}
 }

@@ -4,9 +4,11 @@ import com.example.findcolor.entity.AnalysisRequest;
 import com.example.findcolor.entity.AnalysisResult;
 import com.example.findcolor.entity.ColorType;
 import com.example.findcolor.entity.DetectedColor;
+import com.example.findcolor.entity.MissionImage;
 import com.example.findcolor.repository.AnalysisRequestRepository;
 import com.example.findcolor.repository.AnalysisResultRepository;
 import com.example.findcolor.repository.DetectedColorRepository;
+import com.example.findcolor.repository.MissionImageRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -31,19 +33,28 @@ public class ColorAnalysisService {
     private final AnalysisRequestRepository analysisRequestRepository;
     private final AnalysisResultRepository analysisResultRepository;
     private final DetectedColorRepository detectedColorRepository;
+    private final MissionImageRepository missionImageRepository;
+    private final S3Service s3Service;
 
     @Value("${color.analysis.match-score-threshold}")
     private double matchScoreThreshold;
 
     @Async
     @Transactional
-    public void processAnalysisAsync(Long requestId, byte[] fileBytes, String targetSentiment) {
+    public void processAnalysisAsync(Long requestId, Long imageId, byte[] fileBytes, String targetSentiment) {
         log.info("[Analysis Start] Request ID: {}, Target Sentiment: {}", requestId, targetSentiment);
         try {
             AnalysisRequest request = analysisRequestRepository.findById(requestId)
                     .orElseThrow(() -> new RuntimeException("분석 요청을 찾을 수 없습니다."));
 
             AnalysisData analysisData = analyzeWithRatios(fileBytes, targetSentiment);
+
+            // 분석 성공 후 S3 업로드 → 실패 시 orphan 파일 없음
+            String imageUrl = s3Service.uploadFile(fileBytes, "image/jpeg");
+            MissionImage missionImage = missionImageRepository.findById(imageId)
+                    .orElseThrow(() -> new RuntimeException("이미지 엔티티를 찾을 수 없습니다."));
+            missionImage.setImageUrl(imageUrl);
+            missionImageRepository.save(missionImage);
 
             double otherChromaticRatio = analysisData.totalChromaticRatio - analysisData.targetColorTotalRatio;
             boolean isMatched = analysisData.targetWeightedScoreSum >= matchScoreThreshold
@@ -73,7 +84,7 @@ public class ColorAnalysisService {
             request.setStatus("COMPLETED");
             analysisRequestRepository.saveAndFlush(request);
 
-            log.info("[Analysis End] Request {} → matched={}, score={:.2f}", requestId, isMatched, finalScore);
+            log.info("[Analysis End] Request {} → matched={}, score={}", requestId, isMatched, String.format("%.2f", finalScore));
 
         } catch (Exception e) {
             log.error("[Analysis Error] Request ID: {}, Message: {}", requestId, e.getMessage());

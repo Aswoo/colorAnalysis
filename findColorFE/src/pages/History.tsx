@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowLeft, Clock, CheckCircle, XCircle, ChevronRight, Star } from 'lucide-react';
+import { ArrowLeft, Clock, CheckCircle, XCircle, ChevronRight, ChevronDown, Star } from 'lucide-react';
 import { authService } from '../services/authService';
 import { analysisService } from '../services/analysisService';
 import type { HistoryResponse, PageResponse } from '../services/analysisService';
@@ -10,6 +10,8 @@ const History: React.FC = () => {
   const [user, setUser] = useState<User | null>(null);
   const [history, setHistory] = useState<PageResponse<HistoryResponse> | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [expandedId, setExpandedId] = useState<number | null>(null);
+  const [failedImages, setFailedImages] = useState<Set<number>>(new Set());
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -66,48 +68,92 @@ const History: React.FC = () => {
             </div>
           ) : (
             <div className="space-y-4">
-              {history?.content.map((item) => (
-                <div key={item.id} className="group bg-white border border-gray-100 p-4 rounded-2xl shadow-sm hover:shadow-md transition-all flex items-center gap-6">
-                  <div className="w-24 h-24 rounded-xl overflow-hidden shadow-inner flex-shrink-0 bg-gray-100">
-                    <img src={item.imageUrl} alt="Analyzed" className="w-full h-full object-cover" />
-                  </div>
-                  
-                  <div className="flex-1">
-                    <div className="flex items-center gap-3 mb-1">
-                      <span className={`px-2 py-0.5 rounded-full text-[10px] font-black uppercase tracking-tighter ${
-                        item.status === 'COMPLETED' ? 'bg-emerald-100 text-emerald-700' : 
-                        item.status === 'FAILED' ? 'bg-rose-100 text-rose-700' : 'bg-amber-100 text-amber-700'
-                      }`}>
-                        {item.status}
-                      </span>
-                      <span className="text-gray-400 text-xs font-bold">{new Date(item.createdAt).toLocaleDateString()}</span>
-                    </div>
-                    
-                    <h3 className="text-lg font-black text-slate-800 flex items-center gap-2">
-                      Analysis #{item.id}
-                      {item.isFavorite && <Star className="w-4 h-4 text-amber-400 fill-amber-400" />}
-                    </h3>
-                    
-                    {item.status === 'COMPLETED' && (
-                      <div className="flex items-center gap-4 mt-2">
-                        <div className="flex items-center gap-1">
-                          {item.matched ? <CheckCircle className="w-4 h-4 text-emerald-500" /> : <XCircle className="w-4 h-4 text-rose-500" />}
-                          <span className={`text-xs font-bold ${item.matched ? 'text-emerald-600' : 'text-rose-600'}`}>
-                            {item.matched ? 'MATCHED' : 'NOT MATCHED'}
+              {history?.content.map((item) => {
+                const isExpanded = expandedId === item.id;
+                return (
+                  <div key={item.id} className="bg-white border border-gray-100 rounded-2xl shadow-sm hover:shadow-md transition-all overflow-hidden">
+                    <div className="p-4 flex items-center gap-6">
+                      <div className="w-24 h-24 rounded-xl overflow-hidden shadow-inner flex-shrink-0 bg-gray-100 flex items-center justify-center">
+                        {item.imageUrl && !failedImages.has(item.id) ? (
+                          <img
+                            src={item.imageUrl}
+                            alt="Analyzed"
+                            className="w-full h-full object-cover"
+                            onError={() => setFailedImages(prev => new Set([...prev, item.id]))}
+                          />
+                        ) : item.status === 'PROCESSING' ? (
+                          <div className="animate-spin w-8 h-8 border-4 border-indigo-400 border-t-transparent rounded-full" />
+                        ) : (
+                          <XCircle className="w-8 h-8 text-rose-400" />
+                        )}
+                      </div>
+
+                      <div className="flex-1">
+                        <div className="flex items-center gap-3 mb-1">
+                          <span className={`px-2 py-0.5 rounded-full text-[10px] font-black uppercase tracking-tighter ${
+                            item.status === 'COMPLETED' ? 'bg-emerald-100 text-emerald-700' :
+                            item.status === 'FAILED' ? 'bg-rose-100 text-rose-700' : 'bg-amber-100 text-amber-700'
+                          }`}>
+                            {item.status}
                           </span>
+                          <span className="text-gray-400 text-xs font-bold">{new Date(item.createdAt).toLocaleDateString()}</span>
                         </div>
-                        <div className="text-xs font-bold text-slate-400">
-                          SCORE: <span className="text-slate-900">{(item.similarityScore || 0).toFixed(1)}%</span>
+
+                        <h3 className="text-lg font-black text-slate-800 flex items-center gap-2">
+                          Analysis #{item.id}
+                          {item.isFavorite && <Star className="w-4 h-4 text-amber-400 fill-amber-400" />}
+                        </h3>
+
+                        {item.status === 'COMPLETED' && (
+                          <div className="flex items-center gap-4 mt-2">
+                            <div className="flex items-center gap-1">
+                              {item.matched ? <CheckCircle className="w-4 h-4 text-emerald-500" /> : <XCircle className="w-4 h-4 text-rose-500" />}
+                              <span className={`text-xs font-bold ${item.matched ? 'text-emerald-600' : 'text-rose-600'}`}>
+                                {item.matched ? 'MATCHED' : 'NOT MATCHED'}
+                              </span>
+                            </div>
+                            <div className="text-xs font-bold text-slate-400">
+                              SCORE: <span className="text-slate-900">{(item.similarityScore || 0).toFixed(1)}%</span>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() => setExpandedId(isExpanded ? null : item.id)}
+                        className="p-3 bg-gray-50 text-gray-400 rounded-xl hover:bg-indigo-50 hover:text-indigo-600 transition-all"
+                      >
+                        {isExpanded ? <ChevronDown className="w-6 h-6" /> : <ChevronRight className="w-6 h-6" />}
+                      </button>
+                    </div>
+
+                    {isExpanded && item.palette && item.palette.length > 0 && (
+                      <div className="px-6 pb-5 border-t border-gray-50 pt-4">
+                        <p className="text-[10px] font-black uppercase tracking-widest text-gray-400 mb-3">Detected Colors</p>
+                        <div className="flex flex-wrap gap-2">
+                          {item.palette.map((color, idx) => (
+                            <div key={idx} className="flex items-center gap-2 bg-gray-50 px-3 py-1.5 rounded-xl">
+                              <div
+                                className="w-5 h-5 rounded-md shadow-sm border border-white"
+                                style={{ backgroundColor: color.hex }}
+                              />
+                              <span className="text-xs font-bold text-slate-600">{color.hex}</span>
+                              <span className="text-xs text-gray-400">{(color.ratio * 100).toFixed(1)}%</span>
+                            </div>
+                          ))}
                         </div>
                       </div>
                     )}
-                  </div>
 
-                  <button className="p-3 bg-gray-50 text-gray-400 rounded-xl group-hover:bg-indigo-50 group-hover:text-indigo-600 transition-all">
-                    <ChevronRight className="w-6 h-6" />
-                  </button>
-                </div>
-              ))}
+                    {isExpanded && (!item.palette || item.palette.length === 0) && (
+                      <div className="px-6 pb-5 border-t border-gray-50 pt-4 text-xs text-gray-400 font-bold">
+                        {item.status === 'PROCESSING' ? 'Analysis in progress...' : 'No palette data available.'}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
               
               {/* Simple Pagination */}
               {history && history.totalPages > 1 && (

@@ -36,42 +36,52 @@ public class MissionService {
     @Transactional(readOnly = true)
     public Page<HistoryResponse> getHistory(Long userId, Pageable pageable) {
         return analysisRequestRepository.findByUserId(userId, pageable)
-                .map(request -> HistoryResponse.builder()
-                        .id(request.getId())
-                        .imageUrl(request.getImage().getImageUrl())
-                        .status(request.getStatus())
-                        .similarityScore(request.getAnalysisResult() != null ? request.getAnalysisResult().getSimilarityScore() : null)
-                        .matched(request.getAnalysisResult() != null ? request.getAnalysisResult().getMatched() : null)
-                        .createdAt(request.getCreatedAt())
-                        .isFavorite(request.isFavorite())
-                        .build());
+                .map(request -> {
+                    List<HistoryResponse.PaletteColor> palette = detectedColorRepository
+                            .findByAnalysisRequestId(request.getId())
+                            .stream()
+                            .map(c -> new HistoryResponse.PaletteColor(c.getColorHex(), c.getRatio()))
+                            .collect(Collectors.toList());
+
+                    return HistoryResponse.builder()
+                            .id(request.getId())
+                            .imageUrl(request.getImage().getImageUrl())
+                            .status(request.getStatus())
+                            .similarityScore(request.getAnalysisResult() != null ? request.getAnalysisResult().getSimilarityScore() : null)
+                            .matched(request.getAnalysisResult() != null ? request.getAnalysisResult().getMatched() : null)
+                            .createdAt(request.getCreatedAt())
+                            .isFavorite(request.isFavorite())
+                            .palette(palette)
+                            .build();
+                });
     }
 
     @Transactional
     public MissionResponse performMission(Long userId, String targetSentiment, MultipartFile file) throws IOException {
         User user = userRepository.findById(userId).orElseThrow(() -> new RuntimeException("사용자 없음"));
-        String s3Url = s3Service.uploadFile(file);
-        MissionImage missionImage = MissionImage.builder().user(user).imageUrl(s3Url).build();
+
+        // imageUrl은 분석 완료 후 @Async 스레드에서 채워진다
+        MissionImage missionImage = MissionImage.builder().user(user).build();
         missionImageRepository.save(missionImage);
 
         AnalysisRequest request = AnalysisRequest.builder().user(user).image(missionImage).status("PROCESSING").isFavorite(false).build();
         analysisRequestRepository.save(request);
 
-        // 파일 바이트를 트랜잭션 커밋 전에 미리 읽어둔다.
-        // HTTP 요청이 끝나면 MultipartFile 임시 파일이 삭제되므로
-        // @Async 스레드에서 file.getBytes()를 호출하면 IOException이 발생한다.
+        // HTTP 요청 스코프가 살아있는 지금 바이트를 미리 복사한다
+        // 요청이 끝나면 MultipartFile 임시 파일이 삭제되어 @Async 스레드에서 접근 불가
         final byte[] fileBytes = file.getBytes();
         final Long requestId = request.getId();
+        final Long imageId = missionImage.getId();
 
-        // 트랜잭션 커밋 후에 async를 실행해야 async 스레드에서 findById가 성공한다.
+        // 커밋 완료 후 @Async 실행: findById 타이밍 문제 방지
         TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
             @Override
             public void afterCommit() {
-                colorAnalysisService.processAnalysisAsync(requestId, fileBytes, targetSentiment);
+                colorAnalysisService.processAnalysisAsync(requestId, imageId, fileBytes, targetSentiment);
             }
         });
 
-        return new MissionResponse(request.getId(), request.getStatus(), missionImage.getImageUrl(), "접수됨");
+        return new MissionResponse(request.getId(), request.getStatus(), "접수됨");
     }
 
     @Transactional(readOnly = true)

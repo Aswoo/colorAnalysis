@@ -22,7 +22,7 @@ public class MissionImage {
     @JoinColumn(name = "user_id")
     private User user;
 
-    @Column(nullable = false)
+    @Column
     private String imageUrl;
 
     @CreationTimestamp

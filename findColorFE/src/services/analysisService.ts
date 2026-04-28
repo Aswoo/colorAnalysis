@@ -1,14 +1,20 @@
 import apiClient from './apiClient'; // 공통 클라이언트 사용
 import type { AnalysisStatusResponse } from '../types/analysis';
 
+export interface PaletteColor {
+  hex: string;
+  ratio: number;
+}
+
 export interface HistoryResponse {
   id: number;
-  imageUrl: string;
+  imageUrl: string | null;
   status: string;
   similarityScore: number | null;
   matched: boolean | null;
   createdAt: string;
   isFavorite: boolean;
+  palette: PaletteColor[];
 }
 
 export interface PageResponse<T> {
